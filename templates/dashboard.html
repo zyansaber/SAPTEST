@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head><title>Dashboard</title></head>
+<body>
+    <h2>Welcome, {{ user }}</h2>
+    <h3>Available Tables:</h3>
+    <ul>
+    {% for table in tables %}
+        <li><a href="{{ url_for('view_table', table_name=table) }}">{{ table }}</a></li>
+    {% endfor %}
+    </ul>
+</body>
+</html>

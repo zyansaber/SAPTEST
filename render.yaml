@@ -1,0 +1,5 @@
+services:
+- type: web
+  name: azure-sql-webapp
+  env: docker
+  plan: free
