@@ -7,9 +7,10 @@ app.secret_key = "secure_session"
 
 # 使用 pyodbc 连接 Azure SQL
 conn_str = (
-    "mssql+pyodbc://sqladmin:Planning456!@sap-sqlserver.database.windows.net:1433/sapdb"
+    "mssql+pyodbc://sqladmin:Planning456%21@sap-sqlserver.database.windows.net:1433/sapdb"
     "?driver=ODBC+Driver+17+for+SQL+Server&encrypt=yes"
 )
+
 engine = create_engine(conn_str)
 
 @app.route("/", methods=["GET", "POST"])
