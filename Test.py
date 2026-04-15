@@ -538,77 +538,75 @@ def build_report():
         ]
     ].copy()
 
-# ===========================
-# NEW: orders_po_missing 新逻辑（按你要求）
-# ===========================
+    # ===========================
+    # NEW: orders_po_missing 新逻辑（按你要求）
+    # ===========================
+    target_dealers = ["Geelong", "ST James", "Launceston", "Traralgon", "Frankston"]
 
-target_dealers = ["Geelong", "ST James", "Launceston", "Traralgon", "Frankston"]
+    # 1. 过滤 Orderlist
+    ol_target = ol_dedup[
+        ol_dedup["Dealer"].isin(target_dealers)
+    ].copy()
 
-# 1. 过滤 Orderlist
-ol_target = ol_dedup[
-    ol_dedup["Dealer"].isin(target_dealers)
-].copy()
+    # 2. 准备 orders API 数据（按 chassis 建索引）
+    orders_map = main_dedup.set_index("carFrameNumber_Clean")
 
-# 2. 准备 orders API 数据（按 chassis 建索引）
-orders_map = main_dedup.set_index("carFrameNumber_Clean")
+    # 3. 准备 instore API 数据（按 code/chassis 建索引）
+    instore_df["code_clean"] = instore_df["code"].apply(clean_chassis)
+    instore_map = instore_df.set_index("code_clean")
 
-# 3. 准备 instore API 数据（按 code/chassis 建索引）
-instore_df["code_clean"] = instore_df["code"].apply(clean_chassis)
-instore_map = instore_df.set_index("code_clean")
+    results = []
 
-results = []
+    for _, row in ol_target.iterrows():
+        chassis = row["Chassis_Clean"]
 
-for _, row in ol_target.iterrows():
-    chassis = row["Chassis_Clean"]
+        orders_row = orders_map.loc[chassis] if chassis in orders_map.index else None
+        instore_row = instore_map.loc[chassis] if chassis in instore_map.index else None
 
-    orders_row = orders_map.loc[chassis] if chassis in orders_map.index else None
-    instore_row = instore_map.loc[chassis] if chassis in instore_map.index else None
+        erpSO = None
+        erpPO = None
 
-    erpSO = None
-    erpPO = None
+        # 从 orders 取
+        if orders_row is not None:
+            erpSO = orders_row.get("erpSONumber")
+            erpPO = orders_row.get("erpPONumber")
 
-    # 从 orders 取
-    if orders_row is not None:
-        erpSO = orders_row.get("erpSONumber")
-        erpPO = orders_row.get("erpPONumber")
+        # 如果 orders 没有，再从 instore 兜底
+        if (erpSO is None or str(erpSO).strip() == "") and instore_row is not None:
+            erpSO = instore_row.get("erpSO")
 
-    # 如果 orders 没有，再从 instore 兜底
-    if (erpSO is None or str(erpSO).strip() == "") and instore_row is not None:
-        erpSO = instore_row.get("erpSO")
+        if (erpPO is None or str(erpPO).strip() == "") and instore_row is not None:
+            erpPO = instore_row.get("erpPO")
 
-    if (erpPO is None or str(erpPO).strip() == "") and instore_row is not None:
-        erpPO = instore_row.get("erpPO")
+        erpSO_norm = normalize_api_value(erpSO)
+        erpPO_norm = normalize_api_value(erpPO)
 
-    erpSO_norm = normalize_api_value(erpSO)
-    erpPO_norm = normalize_api_value(erpPO)
+        erpSO_missing = "✗" if erpSO_norm is None else "✓"
+        erpPO_missing = "✗" if erpPO_norm is None else "✓"
 
-    erpSO_missing = "✗" if erpSO_norm is None else "✓"
-    erpPO_missing = "✗" if erpPO_norm is None else "✓"
+        # ❗ 核心规则：只要一个缺就报错
+        if erpSO_missing == "✗" or erpPO_missing == "✗":
+            results.append({
+                "Chassis": row["Chassis"],
+                "Chassis_Clean": chassis,
+                "Dealer": row["Dealer"],
+                "Model": row["Model"],
+                "Customer": row["Customer"],
+                "erpSO": erpSO,
+                "erpPO": erpPO,
+                "erpSO_norm": erpSO_norm,
+                "erpPO_norm": erpPO_norm,
+                "erpSO_missing": erpSO_missing,
+                "erpPO_missing": erpPO_missing,
+                "error_type": "; ".join([
+                    x for x in [
+                        "erpSO 缺失" if erpSO_missing == "✗" else None,
+                        "erpPO 缺失" if erpPO_missing == "✗" else None
+                    ] if x
+                ])
+            })
 
-    # ❗ 核心规则：只要一个缺就报错
-    if erpSO_missing == "✗" or erpPO_missing == "✗":
-        results.append({
-            "Chassis": row["Chassis"],
-            "Chassis_Clean": chassis,
-            "Dealer": row["Dealer"],
-            "Model": row["Model"],
-            "Customer": row["Customer"],
-            "erpSO": erpSO,
-            "erpPO": erpPO,
-            "erpSO_norm": erpSO_norm,
-            "erpPO_norm": erpPO_norm,
-            "erpSO_missing": erpSO_missing,
-            "erpPO_missing": erpPO_missing,
-            "error_type": "; ".join([
-                x for x in [
-                    "erpSO 缺失" if erpSO_missing == "✗" else None,
-                    "erpPO 缺失" if erpPO_missing == "✗" else None
-                ] if x
-            ])
-        })
-
-orders_po_missing = pd.DataFrame(results)
-
+    orders_po_missing = pd.DataFrame(results)
 
     # ===========================
     # 导出
