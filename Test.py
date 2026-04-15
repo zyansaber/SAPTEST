@@ -238,45 +238,45 @@ def extract_order_list(data):
 
 def fetch_all_orders(session, token):
     all_data = []
+    current_page = 0
 
-    first_data = fetch_orders_page(session, token, current_page=0, page_size=PAGE_SIZE)
-    if not first_data:
-        return []
-
-    print("\n========== 第 0 页返回结构检查 ==========")
-    print("顶层 keys:", list(first_data.keys()))
-    print(json.dumps(first_data, ensure_ascii=False, indent=2)[:3000])
-
-    pagination = first_data.get("pagination", {})
-    results = extract_order_list(first_data)
-
-    total_pages = pagination.get("totalPages", 1)
-    total_count = pagination.get("totalCount", len(results))
-
-    print("\n总页数:", total_pages)
-    print("总条数:", total_count)
-    print("第 0 页条数:", len(results))
-
-    for r in results:
-        r["pageNumber"] = 0
-    all_data.extend(results)
-
-    for current_page in range(1, total_pages):
+    while True:
         data = fetch_orders_page(session, token, current_page=current_page, page_size=PAGE_SIZE)
         if not data:
+            print(f"⚠️ 第 {current_page} 页无有效响应，停止分页")
             break
 
         page_results = extract_order_list(data)
+
+        if current_page == 0:
+            print("\n========== 第 0 页返回结构检查 ==========")
+            print("顶层 keys:", list(data.keys()))
+            print(json.dumps(data, ensure_ascii=False, indent=2)[:3000])
+
+            pagination = data.get("pagination", {})
+            total_pages = pagination.get("totalPages")
+            total_count = pagination.get("totalCount")
+            if total_pages is not None:
+                print("\n总页数(接口返回):", total_pages)
+            if total_count is not None:
+                print("总条数(接口返回):", total_count)
+
         print(f"第 {current_page} 页条数:", len(page_results))
 
         if not page_results:
-            if current_page == 1 and len(all_data) == 0:
-                print("⚠️ 前两页都没有读取到列表，极可能是字段路径不对或接口另有筛选条件")
+            print("✅ 已到最后一页")
             break
 
         for r in page_results:
             r["pageNumber"] = current_page
         all_data.extend(page_results)
+
+        current_page += 1
+
+        # 防止接口异常导致死循环
+        if current_page > 1000:
+            print("⚠️ 超过1000页，强制停止（防死循环）")
+            break
 
     print("✅ orders 最终读取条数:", len(all_data))
     return all_data
@@ -538,77 +538,75 @@ def build_report():
         ]
     ].copy()
 
-# ===========================
-# NEW: orders_po_missing 新逻辑（按你要求）
-# ===========================
+    # ===========================
+    # NEW: orders_po_missing 新逻辑（按你要求）
+    # ===========================
+    target_dealers = ["Geelong", "ST James", "Launceston", "Traralgon", "Frankston"]
 
-target_dealers = ["Geelong", "ST James", "Launceston", "Traralgon", "Frankston"]
+    # 1. 过滤 Orderlist
+    ol_target = ol_dedup[
+        ol_dedup["Dealer"].isin(target_dealers)
+    ].copy()
 
-# 1. 过滤 Orderlist
-ol_target = ol_dedup[
-    ol_dedup["Dealer"].isin(target_dealers)
-].copy()
+    # 2. 准备 orders API 数据（按 chassis 建索引）
+    orders_map = main_dedup.set_index("carFrameNumber_Clean")
 
-# 2. 准备 orders API 数据（按 chassis 建索引）
-orders_map = main_dedup.set_index("carFrameNumber_Clean")
+    # 3. 准备 instore API 数据（按 code/chassis 建索引）
+    instore_df["code_clean"] = instore_df["code"].apply(clean_chassis)
+    instore_map = instore_df.set_index("code_clean")
 
-# 3. 准备 instore API 数据（按 code/chassis 建索引）
-instore_df["code_clean"] = instore_df["code"].apply(clean_chassis)
-instore_map = instore_df.set_index("code_clean")
+    results = []
 
-results = []
+    for _, row in ol_target.iterrows():
+        chassis = row["Chassis_Clean"]
 
-for _, row in ol_target.iterrows():
-    chassis = row["Chassis_Clean"]
+        orders_row = orders_map.loc[chassis] if chassis in orders_map.index else None
+        instore_row = instore_map.loc[chassis] if chassis in instore_map.index else None
 
-    orders_row = orders_map.loc[chassis] if chassis in orders_map.index else None
-    instore_row = instore_map.loc[chassis] if chassis in instore_map.index else None
+        erpSO = None
+        erpPO = None
 
-    erpSO = None
-    erpPO = None
+        # 从 orders 取
+        if orders_row is not None:
+            erpSO = orders_row.get("erpSONumber")
+            erpPO = orders_row.get("erpPONumber")
 
-    # 从 orders 取
-    if orders_row is not None:
-        erpSO = orders_row.get("erpSONumber")
-        erpPO = orders_row.get("erpPONumber")
+        # 如果 orders 没有，再从 instore 兜底
+        if (erpSO is None or str(erpSO).strip() == "") and instore_row is not None:
+            erpSO = instore_row.get("erpSO")
 
-    # 如果 orders 没有，再从 instore 兜底
-    if (erpSO is None or str(erpSO).strip() == "") and instore_row is not None:
-        erpSO = instore_row.get("erpSO")
+        if (erpPO is None or str(erpPO).strip() == "") and instore_row is not None:
+            erpPO = instore_row.get("erpPO")
 
-    if (erpPO is None or str(erpPO).strip() == "") and instore_row is not None:
-        erpPO = instore_row.get("erpPO")
+        erpSO_norm = normalize_api_value(erpSO)
+        erpPO_norm = normalize_api_value(erpPO)
 
-    erpSO_norm = normalize_api_value(erpSO)
-    erpPO_norm = normalize_api_value(erpPO)
+        erpSO_missing = "✗" if erpSO_norm is None else "✓"
+        erpPO_missing = "✗" if erpPO_norm is None else "✓"
 
-    erpSO_missing = "✗" if erpSO_norm is None else "✓"
-    erpPO_missing = "✗" if erpPO_norm is None else "✓"
+        # ❗ 核心规则：只要一个缺就报错
+        if erpSO_missing == "✗" or erpPO_missing == "✗":
+            results.append({
+                "Chassis": row["Chassis"],
+                "Chassis_Clean": chassis,
+                "Dealer": row["Dealer"],
+                "Model": row["Model"],
+                "Customer": row["Customer"],
+                "erpSO": erpSO,
+                "erpPO": erpPO,
+                "erpSO_norm": erpSO_norm,
+                "erpPO_norm": erpPO_norm,
+                "erpSO_missing": erpSO_missing,
+                "erpPO_missing": erpPO_missing,
+                "error_type": "; ".join([
+                    x for x in [
+                        "erpSO 缺失" if erpSO_missing == "✗" else None,
+                        "erpPO 缺失" if erpPO_missing == "✗" else None
+                    ] if x
+                ])
+            })
 
-    # ❗ 核心规则：只要一个缺就报错
-    if erpSO_missing == "✗" or erpPO_missing == "✗":
-        results.append({
-            "Chassis": row["Chassis"],
-            "Chassis_Clean": chassis,
-            "Dealer": row["Dealer"],
-            "Model": row["Model"],
-            "Customer": row["Customer"],
-            "erpSO": erpSO,
-            "erpPO": erpPO,
-            "erpSO_norm": erpSO_norm,
-            "erpPO_norm": erpPO_norm,
-            "erpSO_missing": erpSO_missing,
-            "erpPO_missing": erpPO_missing,
-            "error_type": "; ".join([
-                x for x in [
-                    "erpSO 缺失" if erpSO_missing == "✗" else None,
-                    "erpPO 缺失" if erpPO_missing == "✗" else None
-                ] if x
-            ])
-        })
-
-orders_po_missing = pd.DataFrame(results)
-
+    orders_po_missing = pd.DataFrame(results)
 
     # ===========================
     # 导出
