@@ -398,7 +398,7 @@ def build_report():
     )
 
     # ===========================
-    # inStore 缺失 erpPO / erpSO（最稳版）
+    # inStore 缺失 erpSO（按最新要求）
     # ===========================
     instore_df = pd.json_normalize(instore_rows)
 
@@ -413,10 +413,10 @@ def build_report():
     instore_df["erpSO_missing"] = instore_df["erpSO_norm"].apply(lambda x: "✗" if x is None else "✓")
 
     instore_error = instore_df[
-        instore_df["erpPO_norm"].isna() | instore_df["erpSO_norm"].isna()
+        instore_df["erpSO_norm"].isna()
     ].copy()
 
-    instore_error["error_type"] = "inStore 缺失 erpPO / erpSO"
+    instore_error["error_type"] = "inStore 缺失 erpSO"
 
     instore_error_final = instore_error[
         [
@@ -424,11 +424,8 @@ def build_report():
             "dealer",
             "soldTo",
             "stockStatusCode",
-            "erpPO",
             "erpSO",
-            "erpPO_norm",
             "erpSO_norm",
-            "erpPO_missing",
             "erpSO_missing",
             "error_type"
         ]
@@ -519,6 +516,9 @@ def build_report():
         axis=1
     )
 
+    if "Regent Production" not in final_error.columns:
+        final_error["Regent Production"] = None
+
     final_error_report = final_error[
         [
             "carFrameNumber",
@@ -589,6 +589,7 @@ def build_report():
             results.append({
                 "Chassis": row["Chassis"],
                 "Chassis_Clean": chassis,
+                "Regent Production": row["Regent Production"],
                 "Dealer": row["Dealer"],
                 "Model": row["Model"],
                 "Customer": row["Customer"],
@@ -626,7 +627,7 @@ def build_report():
 
         summary = pd.DataFrame([
             {"item": "inStore 原始条数", "value": len(instore_df)},
-            {"item": "inStore 缺失 erpPO/erpSO 条数", "value": len(instore_error_final)},
+            {"item": "inStore 缺失 erpSO 条数", "value": len(instore_error_final)},
             {"item": "orders 原始条数", "value": len(main_df)},
             {"item": "orders 匹配到 Orderlist 条数", "value": len(merged)},
             {"item": "orders erpPONumber 缺失条数", "value": len(orders_po_missing)},
