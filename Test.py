@@ -367,12 +367,19 @@ def build_report():
     # Orderlist
     # ===========================
     ol = read_excel_bytes_select_sheet(orderlist_bytes, "Orderlist")
-    for c in ["Chassis", "Regent Production", "Model", "Dealer", "Customer"]:
+    for c in ["Chassis", "Regent Production", "Model", "Dealer", "Customer", "Signed Plans Received"]:
         if c not in ol.columns:
             ol[c] = None
 
     ol["Chassis_Clean"] = ol["Chassis"].apply(clean_chassis)
-    ol = ol[ol["Regent Production"].fillna("").astype(str).str.strip() != "Finished"].copy()
+    ol["Signed Plans Received_norm"] = (
+        ol["Signed Plans Received"].fillna("").astype(str).str.strip().str.lower()
+    )
+    ol = ol[
+        (ol["Regent Production"].fillna("").astype(str).str.strip() != "Finished") &
+        (ol["Signed Plans Received_norm"] != "") &
+        (ol["Signed Plans Received_norm"] != "no")
+    ].copy()
 
     ol_dedup = (
         ol[["Chassis", "Chassis_Clean", "Regent Production", "Model", "Dealer", "Customer"]]
@@ -398,7 +405,7 @@ def build_report():
     )
 
     # ===========================
-    # inStore 缺失 erpPO / erpSO（最稳版）
+    # inStore 缺失 erpSO（按最新要求）
     # ===========================
     instore_df = pd.json_normalize(instore_rows)
 
@@ -413,10 +420,10 @@ def build_report():
     instore_df["erpSO_missing"] = instore_df["erpSO_norm"].apply(lambda x: "✗" if x is None else "✓")
 
     instore_error = instore_df[
-        instore_df["erpPO_norm"].isna() | instore_df["erpSO_norm"].isna()
+        instore_df["erpSO_norm"].isna()
     ].copy()
 
-    instore_error["error_type"] = "inStore 缺失 erpPO / erpSO"
+    instore_error["error_type"] = "inStore 缺失 erpSO"
 
     instore_error_final = instore_error[
         [
@@ -424,11 +431,8 @@ def build_report():
             "dealer",
             "soldTo",
             "stockStatusCode",
-            "erpPO",
             "erpSO",
-            "erpPO_norm",
             "erpSO_norm",
-            "erpPO_missing",
             "erpSO_missing",
             "error_type"
         ]
@@ -494,17 +498,11 @@ def build_report():
         lambda r: mark_match(r["dealerCode"], r["Expected_SAP_Code"]), axis=1
     )
 
-    merged["orgUnitUid_Check"] = merged.apply(
-        lambda r: mark_match(r["orgCustomer.orgUnit.uid"], r["Expected_SAP_Code"]), axis=1
-    )
-
     # orders 错误条件：
     # 1. dealerCode 不匹配
-    # 2. orgCustomer.orgUnit.uid 不匹配
-    # 3. erpPONumber 缺失
+    # 2. erpPONumber 缺失
     final_error = merged[
         (merged["dealerCode_Check"] == "✗") |
-        (merged["orgUnitUid_Check"] == "✗") |
         (merged["erpPONumber_missing"] == "✗")
     ].copy()
 
@@ -512,12 +510,14 @@ def build_report():
         lambda r: "; ".join([
             x for x in [
                 "dealerCode 校验异常" if r["dealerCode_Check"] == "✗" else None,
-                "orgCustomer.orgUnit.uid 校验异常" if r["orgUnitUid_Check"] == "✗" else None,
                 "erpPONumber 缺失" if r["erpPONumber_missing"] == "✗" else None
             ] if x
         ]),
         axis=1
     )
+
+    if "Regent Production" not in final_error.columns:
+        final_error["Regent Production"] = None
 
     final_error_report = final_error[
         [
@@ -533,7 +533,6 @@ def build_report():
             "Dealer",
             "Expected_SAP_Code",
             "dealerCode_Check",
-            "orgUnitUid_Check",
             "error_type"
         ]
     ].copy()
@@ -589,6 +588,7 @@ def build_report():
             results.append({
                 "Chassis": row["Chassis"],
                 "Chassis_Clean": chassis,
+                "Regent Production": row["Regent Production"],
                 "Dealer": row["Dealer"],
                 "Model": row["Model"],
                 "Customer": row["Customer"],
@@ -626,7 +626,7 @@ def build_report():
 
         summary = pd.DataFrame([
             {"item": "inStore 原始条数", "value": len(instore_df)},
-            {"item": "inStore 缺失 erpPO/erpSO 条数", "value": len(instore_error_final)},
+            {"item": "inStore 缺失 erpSO 条数", "value": len(instore_error_final)},
             {"item": "orders 原始条数", "value": len(main_df)},
             {"item": "orders 匹配到 Orderlist 条数", "value": len(merged)},
             {"item": "orders erpPONumber 缺失条数", "value": len(orders_po_missing)},
