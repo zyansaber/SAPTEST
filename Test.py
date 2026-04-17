@@ -589,7 +589,6 @@ def build_report():
             results.append({
                 "Chassis": row["Chassis"],
                 "Chassis_Clean": chassis,
-                "Regent Production": row["Regent Production"],
                 "Dealer": row["Dealer"],
                 "Model": row["Model"],
                 "Customer": row["Customer"],
