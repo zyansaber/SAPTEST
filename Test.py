@@ -367,12 +367,19 @@ def build_report():
     # Orderlist
     # ===========================
     ol = read_excel_bytes_select_sheet(orderlist_bytes, "Orderlist")
-    for c in ["Chassis", "Regent Production", "Model", "Dealer", "Customer"]:
+    for c in ["Chassis", "Regent Production", "Model", "Dealer", "Customer", "Signed Plans Received"]:
         if c not in ol.columns:
             ol[c] = None
 
     ol["Chassis_Clean"] = ol["Chassis"].apply(clean_chassis)
-    ol = ol[ol["Regent Production"].fillna("").astype(str).str.strip() != "Finished"].copy()
+    ol["Signed Plans Received_norm"] = (
+        ol["Signed Plans Received"].fillna("").astype(str).str.strip().str.lower()
+    )
+    ol = ol[
+        (ol["Regent Production"].fillna("").astype(str).str.strip() != "Finished") &
+        (ol["Signed Plans Received_norm"] != "") &
+        (ol["Signed Plans Received_norm"] != "no")
+    ].copy()
 
     ol_dedup = (
         ol[["Chassis", "Chassis_Clean", "Regent Production", "Model", "Dealer", "Customer"]]
@@ -491,17 +498,11 @@ def build_report():
         lambda r: mark_match(r["dealerCode"], r["Expected_SAP_Code"]), axis=1
     )
 
-    merged["orgUnitUid_Check"] = merged.apply(
-        lambda r: mark_match(r["orgCustomer.orgUnit.uid"], r["Expected_SAP_Code"]), axis=1
-    )
-
     # orders 错误条件：
     # 1. dealerCode 不匹配
-    # 2. orgCustomer.orgUnit.uid 不匹配
-    # 3. erpPONumber 缺失
+    # 2. erpPONumber 缺失
     final_error = merged[
         (merged["dealerCode_Check"] == "✗") |
-        (merged["orgUnitUid_Check"] == "✗") |
         (merged["erpPONumber_missing"] == "✗")
     ].copy()
 
@@ -509,7 +510,6 @@ def build_report():
         lambda r: "; ".join([
             x for x in [
                 "dealerCode 校验异常" if r["dealerCode_Check"] == "✗" else None,
-                "orgCustomer.orgUnit.uid 校验异常" if r["orgUnitUid_Check"] == "✗" else None,
                 "erpPONumber 缺失" if r["erpPONumber_missing"] == "✗" else None
             ] if x
         ]),
@@ -533,7 +533,6 @@ def build_report():
             "Dealer",
             "Expected_SAP_Code",
             "dealerCode_Check",
-            "orgUnitUid_Check",
             "error_type"
         ]
     ].copy()
