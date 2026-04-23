@@ -1,5 +1,0 @@
-flask
-pyodbc
-sqlalchemy
-pandas
-gunicorn
