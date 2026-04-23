@@ -54,7 +54,8 @@ SELECT
     vbap."MATNR" AS "Material No",
     objk."SERNR" AS "Chassis No",
     st."SHIP_TO" AS "Ship-to Code",
-    vbak."ZVKBUR" AS "Actual Location SAP"
+    vbak."ZVKBUR" AS "Actual Location SAP",
+    vbak."VKORG" AS "Sales Company"
 
 FROM "SAPHANADB"."VBAP" vbap
 
@@ -207,6 +208,23 @@ def build_final_dataframe(orderlist_bytes: bytes) -> pd.DataFrame:
         on="Chassis_Clean"
     )
 
+    # 过滤 1：Regent Production = finished 的不显示
+    merged = merged[
+        ~merged["Regent Production"]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .eq("finished")
+    ].copy()
+
+    # 过滤 2：只保留销售公司 3110
+    merged = merged[
+        merged["Sales Company"]
+        .astype(str)
+        .str.strip()
+        .eq("3110")
+    ].copy()
+
     def location_check_row(r):
         zvkbur = clean_text(r.get("Actual Location SAP"))
         shipto = clean_text(r.get("Ship-to Code"))
@@ -234,6 +252,11 @@ def build_final_dataframe(orderlist_bytes: bytes) -> pd.DataFrame:
     merged["Hit Detail"] = merged.apply(location_hit_detail, axis=1)
     merged["ZVKBUR_in_List"] = merged["Actual Location SAP"].isin(VALID_LOCATIONS)
     merged["ShipTo_in_List"] = merged["Ship-to Code"].isin(VALID_LOCATIONS)
+
+    # 过滤 3：Actual Location SAP 或 Ship-to Code 至少一个命中 VALID_LOCATIONS
+    merged = merged[
+        merged["ZVKBUR_in_List"] | merged["ShipTo_in_List"]
+    ].copy()
 
     final = merged[[
         "Sales Order",
